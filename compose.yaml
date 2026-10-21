@@ -1,0 +1,18 @@
+services:
+  benchmark:
+    image: multi-stream-ai-benchmark:1.2
+    build: .
+    init: true
+    shm_size: "1gb"
+    volumes:
+      - ./video.mp4:/app/video.mp4:ro
+      - ./config.json:/app/config.json:ro
+      - ./models:/app/models
+      - ./results:/app/results
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

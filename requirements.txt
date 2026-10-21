@@ -1,0 +1,6 @@
+# PyTorch/torchvision are supplied together by the pinned Docker base image.
+ultralytics==8.3.253
+numpy==1.26.4
+opencv-python==4.10.0.84
+psutil==6.1.1
+nvidia-ml-py==12.570.86

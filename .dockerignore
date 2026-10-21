@@ -1,0 +1,10 @@
+.git
+video.mp4
+models
+results
+__pycache__
+**/__pycache__
+.pytest_cache
+.venv
+docs
+README.md
