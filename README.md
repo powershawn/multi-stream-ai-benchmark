@@ -1,6 +1,6 @@
 # 多路攝影機 × 六個 YOLO-M GPU 容量測試
 
-以固定 `video.mp4` 模擬獨立攝影機。**目前每路每秒分析 10 張畫面，每張畫面必須完成六份獨立 `yolo11m.pt` 推論。** 六份模型常駐同一張 GPU，供各路共用；不是每加一路再載入六份模型。預設使用 CUDA Graph 減少 CPU 提交開銷，沒有啟用 TensorRT。1.2 版新增中文參數說明與指定路數、遇失敗停止的清單模式。
+以固定 `video.mp4` 模擬獨立攝影機。**目前每路每秒分析 10 張畫面，每張畫面必須完成六份獨立 `yolo11m.pt` 推論。** 六份模型常駐同一張 GPU，供各路共用；不是每加一路再載入六份模型。預設使用 CUDA Graph 減少 CPU 提交開銷，沒有啟用 TensorRT。1.2 版新增指定路數與中文參數說明；**1.3 版每次測試自動記錄當下 GPU／CPU／RAM 與環境，不固定使用此電腦的規格。**
 
 本機 RTX 3060 Laptop GPU 最新 1.2 版重測在 **10 FPS 下，2 路通過 3 × 300 秒確認**，報告為 `results/20261022-051829-1cf59e/report.md`。本次依指定清單測試：4 路失敗後停止，未補測 3 路，也未測 8／16 路；因此 2 路是本次清單中最高已確認值。先前自動搜尋的 10 FPS 測試也確認 2 路，且 3 路未通過（`results/20261021-083911-f628f2/`）。之前 15 FPS 設定下為 1 路通過；詳細瓶頸與 CUDA Graph 驗證見 `docs/performance-optimization.md`。不同影片、機器或設定需重新測試。
 
@@ -52,7 +52,7 @@ docker compose run --rm benchmark run
 "max_streams": 16
 ```
 
-首次升級到 1.2 需重建映像；之後只改 `config.json` 不需重建，因為 Compose 會直接掛載主機設定檔：
+首次升級到 1.3 需重建映像；之後只改 `config.json` 不需重建，因為 Compose 會直接掛載主機設定檔：
 
 ```sh
 docker compose build
@@ -65,6 +65,30 @@ Windows 也可使用：
 .\run.ps1 -Mode smoke
 .\run.ps1 -Mode run
 ```
+
+## 每次自動記錄當下測試設備（1.3）
+
+每次 `run` 或 `smoke` 都建立新的硬體快照，寫入該次 `environment.json`、`summary.json` 與 `report.md`，不讀取上一次報告，也不把 RTX 3060、i7 或 32 GiB 等規格寫死。`summary.csv` 另外包含 GPU 名稱／UUID／驅動、CPU 型號與記憶體容量，方便比較不同設備。
+
+| 自動記錄 | 來源與範圍 |
+|---|---|
+| GPU 型號、UUID、VRAM、Compute Capability、CUDA runtime、驅動 | 推論 worker 實際選用的 CUDA 裝置，不是盲選 nvidia-smi 第一列；初始化前或讀取失敗顯示未記錄 |
+| CPU 型號、實體／邏輯 CPU 數、程序 affinity 可用 CPU 數 | 本次測試環境可見資訊 |
+| RAM 總容量 | 執行測試的 OS／Docker VM 可見容量；不是保證等於實體主機安裝容量，也不等於容器 cgroup 限額 |
+| 時間、OS、Python、PyTorch、Ultralytics 等版本 | 本次執行時讀取；報告只顯示已保存的快照 |
+| 各階段 GPU／VRAM／CPU／RAM 使用量 | 原本的資源採樣，現在也自動列在 report.md |
+
+**Windows 建議使用啟動腳本**，額外擷取實體主機 CPU、安裝 RAM、Windows 可見 RAM 與 OS，和 Docker／WSL 的容量分開呈現：
+
+```powershell
+.\run.ps1 -Mode run
+# 已匯入或建置好 1.3 映像時，可略過建置
+.\run.ps1 -Mode run -NoBuild
+```
+
+`scripts/Get-HostInfo.ps1` 會在建置與權重準備完成後重新讀取 Windows CIM，將快照僅傳給本次 Docker 命令。缺少、格式錯誤、過期或未來時間的主機快照不會套用；資訊缺失會標明，不能冒用上一台設備的 RAM。採集的 CPU／RAM 規格本身不會改變驗收標準。
+
+直接執行 `docker compose run --rm benchmark run` 仍會自動記錄測試環境 CPU／RAM 與實際 GPU；**沒有 Windows 腳本快照時，主機實體規格顯示「未提供」**。Linux 裸機使用 OS 可見 RAM，虛擬機／Docker Desktop 則是其可見的 RAM；不從容器數值推算實體 RAM。快照中的 RAM 容量與資源驗收保持同樣的 OS／VM 範圍；Windows 實體安裝容量不作為 VM RAM 百分比的分母。
 
 ## 預設驗收條件
 
@@ -114,16 +138,16 @@ docker compose run --rm benchmark smoke --duration 60 --execution predict
 - **前次完整容量測試（自動搜尋）**：`results/20261021-083911-f628f2/report.md`，每路 10 FPS、六模型，2 路通過三輪各 300 秒確認，3 路未通過。已補註硬體與環境資訊。
 - **後續功能短測**：`results/20261021-091308-1f5627/report.md`，雙路僅量測 10 秒，用來確認新版程式可執行，不能取代完整容量長測。不要只挑時間最新的資料夾當作容量結論。
 
-前次完整容量報告中的 CPU 型號與 RAM 總容量為 2026-10-22 補採，已和原始紀錄分開標示；最新重測的主機規格則在本次啟動前核對並另外保存。未改寫兩次測試的原始 JSON／CSV，也未變更自動報告程式；後續新測試仍按下列格式輸出。
+上述 1.2 版完整容量報告的硬體註記是當時另外採集／補註，不代表舊版已自動採集；未改寫它們的原始 JSON／CSV。1.3 起的新測試才會自動擷取並產生設備區塊；新版的功能短測不取代上述容量長測。
 
 主機 `results/<時間-識別碼>/`：
 
 ```text
 config.json                  此次完整設定
-environment.json             軟體版本、GPU／驅動資訊、影片與權重 SHA-256
+environment.json             本次自動擷取的 CPU／RAM／實際 GPU、選用 Windows 主機快照、軟體版本及檔案 SHA-256
 summary.json                 搜尋結果、是否確認、每路指標與失敗原因
-summary.csv                  每個路數／確認回合的匯總，可用 Excel 開啟
-report.md                    可閱讀的報告與路數結論
+summary.csv                  每個路數／確認回合的指標與設備比較欄位，可用 Excel 開啟
+report.md                    可閱讀的設備表、驗收結論與資源使用摘要
 01-search-01streams/
   config.json                該階段設定（確認階段量測時間可能較長）
   preflight.json             六模型各自的單張真實影片推論檢查
@@ -141,15 +165,15 @@ report.md                    可閱讀的報告與路數結論
 
 ## 換到另一台電腦
 
-最簡單是複製整個資料夾（至少 `Dockerfile`、`requirements.txt`、`compose.yaml`、`config.json`、`benchmark/`、`tests/`、`models/`、`video.mp4`），在新電腦執行上述命令。
+最簡單是複製整個資料夾（至少 `Dockerfile`、`requirements.txt`、`compose.yaml`、`config.json`、`benchmark/`、`tests/`、`scripts/`、`models/`、`video.mp4`，Windows 另帶 `run.ps1`），在新電腦執行上述命令。程式會讀取新電腦的設備，不要複製舊的主機快照來當新設備規格。
 
 為了讓兩台使用**完全相同的已建置映像**，也可匯出：
 
 ```sh
-docker save -o multi-stream-ai-benchmark.tar multi-stream-ai-benchmark:1.2
+docker save -o multi-stream-ai-benchmark.tar multi-stream-ai-benchmark:1.3
 ```
 
-將映像 tar、`compose.yaml`、`config.json`、`models/` 和 `video.mp4` 複製至新電腦的同一資料夾，再執行：
+將映像 tar、`compose.yaml`、`config.json`、`models/` 和 `video.mp4` 複製至新電腦的同一資料夾（Windows 主機規格採集另帶 `run.ps1` 與 `scripts/`），再執行：
 
 ```sh
 docker load -i multi-stream-ai-benchmark.tar

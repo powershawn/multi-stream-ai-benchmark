@@ -14,6 +14,7 @@ import traceback
 import uuid
 
 from .config import Config
+from .hardware import collect_runtime_hardware
 from .policy import assess, confirm_capacity, search_capacity, search_configured_counts
 from .reporting import write_json, write_run_report, write_stage_details
 
@@ -29,7 +30,7 @@ def sha256(path):
 def manifest(config):
     metadata = dict(python=sys.version, platform=platform.platform(),
                     timestamp_utc=datetime.now(timezone.utc).isoformat(),
-                    cpu_count=os.cpu_count(), packages={}, files={})
+                    cpu_count=os.cpu_count(), packages={}, files={}, hardware=collect_runtime_hardware())
     for package in ['torch', 'torchvision', 'ultralytics', 'numpy', 'opencv-python', 'psutil', 'nvidia-ml-py']:
         try:
             metadata['packages'][package] = importlib.metadata.version(package)
@@ -55,10 +56,15 @@ def execute_stage(config, count, directory):
     from .telemetry import TelemetryMonitor
     started = time.perf_counter()
     monitor = None
+    gpu_hardware = None
     try:
         if config.backend == 'yolo':
+            import torch
+            from .hardware import collect_cuda_hardware
+            gpu_hardware = collect_cuda_hardware(torch, config.gpu_device)
             from .yolo import YoloModels
             models = YoloModels(config, max_batch=min(count, config.batch_size))
+            models.metadata['gpu'] = gpu_hardware
         else:
             models = SyntheticModels(config)
         write_json(directory / 'preflight.json', models.preflight)
@@ -78,6 +84,8 @@ def execute_stage(config, count, directory):
         capacity_error = any(text in message.lower() for text in ['out of memory', 'cublas_status_alloc_failed'])
         result = dict(stream_count=count, passed=False, reasons=[message],
                       fatal=not capacity_error, hardware_result=config.backend == 'yolo')
+        if gpu_hardware:
+            result['model_environment'] = dict(gpu=gpu_hardware)
         if monitor:
             monitor.stop()
             result['resources'] = monitor.summary()
@@ -131,6 +139,10 @@ def run_benchmark(config, smoke_streams=None):
                               reasons=[f'worker timeout after {timeout:.1f}s'])
                 write_json(stage_dir / 'result.json', result)
         result.update(stage=label, phase=phase)
+        gpu = result.get('model_environment', {}).get('gpu')
+        if gpu:
+            metadata['hardware']['gpu'] = gpu
+            write_json(directory / 'environment.json', metadata)
         stages.append(result)
         write_run_report(directory, summary)
         print(f"[{label}] {'PASS' if result['passed'] else 'FAIL'}: "

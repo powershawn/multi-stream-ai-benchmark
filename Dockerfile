@@ -14,6 +14,7 @@ COPY requirements.txt ./
 RUN python -m pip install --no-cache-dir -r requirements.txt
 COPY benchmark/ ./benchmark/
 COPY tests/ ./tests/
+COPY scripts/ ./scripts/
 COPY config.json ./
 RUN python -m unittest discover -s tests -v
 RUN mkdir -p /tmp/ultralytics

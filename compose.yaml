@@ -1,6 +1,6 @@
 services:
   benchmark:
-    image: multi-stream-ai-benchmark:1.2
+    image: multi-stream-ai-benchmark:1.3
     build: .
     init: true
     shm_size: "1gb"

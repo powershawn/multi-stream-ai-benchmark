@@ -3,6 +3,8 @@
 import csv
 import json
 
+from .hardware_reporting import comparison_fields, hardware_lines
+
 
 def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False), encoding='utf-8')
@@ -20,9 +22,10 @@ def write_stage_details(directory, result, stats):
 
 def write_run_report(directory, summary):
     write_json(directory / 'summary.json', summary)
+    machine = comparison_fields(summary.get('environment') or {})
     columns = ['stage', 'phase', 'streams', 'passed', 'total_fps', 'worst_camera_fps',
                'worst_p95_ms', 'worst_drop_ratio', 'gpu_util_mean_percent', 'gpu_memory_peak_mb',
-               'gpu_memory_peak_percent', 'cpu_mean_percent', 'ram_peak_mb', 'ram_peak_percent', 'reasons']
+               'gpu_memory_peak_percent', 'cpu_mean_percent', 'ram_peak_mb', 'ram_peak_percent', 'reasons'] + list(machine)
     rows = []
     for stage in summary['stages']:
         streams, metrics = stage.get('streams', []), stage.get('resources', {})
@@ -34,6 +37,7 @@ def write_run_report(directory, summary):
                    worst_drop_ratio=max((s['drop_ratio'] for s in streams), default=None),
                    reasons='; '.join(stage.get('reasons', [])))
         row.update({key: metrics.get(key) for key in columns if key in metrics})
+        row.update(machine)
         rows.append(row)
     with (directory / 'summary.csv').open('w', newline='', encoding='utf-8-sig') as file:
         writer = csv.DictWriter(file, fieldnames=columns)
@@ -64,17 +68,27 @@ def write_run_report(directory, summary):
             'then confirm the highest passing count. A failed confirmation ends the run without fallback.'
             if config.get('test_streams') is not None else
             f"Automatic search up to {config['max_streams']} streams, with integer refinement after a failed step.")
-    lines = ['# Six-model camera benchmark', '', conclusion, '',
+    lines = ['# Six-model camera benchmark', '', conclusion, '']
+    lines.extend(hardware_lines(summary.get('environment') or {}))
+    lines.extend([
              plan, '',
              f"Each camera: {config['target_fps']} analysis FPS; six independent models; input size {config['imgsz']}; FP16={config['half']}; batch={config['batch_size']}.", '',
              f"Acceptance: per-camera FPS >= {config['target_fps'] * config['min_fps_ratio']:.2f}; p95 <= {config['max_latency_p95_ms']} ms; drop ratio <= {config['max_drop_ratio']:.2%}; VRAM <= {config['max_vram_percent']}%; RAM <= {config['max_ram_percent']}%.", '',
              'FPS is a frame completing all six models. Latency includes scheduled capture, decode, queue, preprocess, inference and postprocess. Uncompleted frames count as drops.', '',
              'The search assumes capacity degrades as stream count increases. It is specific to this video, software, batching, sampling rate and acceptance settings. Resource peaks are sampled, not continuous hardware maxima.', '',
              '| Stage | Phase | Cameras | Pass | Total FPS | Worst camera FPS | Worst p95 ms |',
-             '|---|---|---:|---|---:|---:|---:|']
+             '|---|---|---:|---|---:|---:|---:|'])
     def fmt(value):
         return '-' if value is None else f'{value:.2f}'
     for row in rows:
         lines.append(f"| {row['stage']} | {row['phase']} | {row['streams']} | {row['passed']} | {fmt(row['total_fps'])} | {fmt(row['worst_camera_fps'])} | {fmt(row['worst_p95_ms'])} |")
+    lines.extend(['', '## 各階段資源使用量', '',
+                  '| Stage | GPU 平均 % | VRAM 峰值 MiB | CPU 平均 % | RAM 峰值 MiB | RAM 峰值 % |',
+                  '|---|---:|---:|---:|---:|---:|---:|'])
+    for row in rows:
+        values = [fmt(row.get(key)) for key in ('gpu_util_mean_percent', 'gpu_memory_peak_mb',
+                  'cpu_mean_percent', 'ram_peak_mb', 'ram_peak_percent')]
+        lines.append(f"| {row['stage']} | " + ' | '.join(values) + ' |')
+    lines.extend(['', 'GPU／VRAM 是整張裝置使用量；CPU／RAM 是測試 OS／Docker VM 的整體使用量。峰值來自定時採樣，不是連續瞬時最大值。'])
     lines.extend(['', 'See summary.json for configuration, file hashes, environment, individual-camera results and failure reasons. See each stage for frames.csv, resources.csv, preflight.json and stage.log.'])
     (directory / 'report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
